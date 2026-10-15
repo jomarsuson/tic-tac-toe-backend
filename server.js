@@ -1,3 +1,4 @@
+
 const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config();
@@ -5,22 +6,30 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use((req, res, next) => {
-    const allowedOrigins = [
-        process.env.FRONTEND_URL,
-        "http://localhost:3000",
-        "http://127.0.0.1:5500"
-    ].filter(Boolean);
+const allowedOrigins = [
+    "https://jomarsuson.github.io",
+    "http://localhost:3000",
+    "http://127.0.0.1:5500",
+    "http://localhost:5500"
+];
 
+app.use((req, res, next) => {
     const origin = req.headers.origin;
 
     if (origin && allowedOrigins.includes(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
     }
 
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET, POST, OPTIONS"
+    );
+
+    res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+    );
 
     if (req.method === "OPTIONS") {
         return res.sendStatus(204);
@@ -37,7 +46,9 @@ const supabase = createClient(
 );
 
 app.get("/", (req, res) => {
-    res.json({ message: "Tic-Tac-Toe API is running!" });
+    res.json({
+        message: "Tic-Tac-Toe API is running!"
+    });
 });
 
 app.get("/api/db-test", async (req, res) => {
@@ -54,7 +65,8 @@ app.get("/api/db-test", async (req, res) => {
             connected: true
         });
     } catch (error) {
-        console.error(error.message);
+        console.error("Database test failed:", error.message);
+
         res.status(500).json({
             connected: false,
             error: error.message
@@ -97,7 +109,8 @@ app.post("/api/save-game", async (req, res) => {
             game: data
         });
     } catch (error) {
-        console.error(error.message);
+        console.error("Could not save game:", error.message);
+
         res.status(500).json({
             error: error.message
         });
@@ -116,7 +129,8 @@ app.get("/api/game-history", async (req, res) => {
 
         res.json(data);
     } catch (error) {
-        console.error(error.message);
+        console.error("Could not load game history:", error.message);
+
         res.status(500).json({
             error: "Failed to load game history"
         });
