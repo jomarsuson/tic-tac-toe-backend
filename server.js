@@ -21,15 +21,8 @@ app.use((req, res, next) => {
         res.setHeader("Vary", "Origin");
     }
 
-    res.setHeader(
-        "Access-Control-Allow-Methods",
-        "GET, POST, OPTIONS"
-    );
-
-    res.setHeader(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization"
-    );
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (req.method === "OPTIONS") {
         return res.sendStatus(204);
@@ -79,12 +72,14 @@ app.post("/api/save-game", async (req, res) => {
         const { result } = req.body;
 
         const scores = {
-            "Player Wins": [1, 0],
-            "AI Wins": [0, 1],
+            "Player": [1, 0],
+            "AI": [0, 1],
+            "Player X": [1, 0],
+            "Player O": [0, 1],
             "Draw": [0, 0]
         };
 
-        if (!scores[result]) {
+        if (!Object.prototype.hasOwnProperty.call(scores, result)) {
             return res.status(400).json({
                 error: "Invalid game result"
             });
