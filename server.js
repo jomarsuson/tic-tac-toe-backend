@@ -21,8 +21,15 @@ app.use((req, res, next) => {
         res.setHeader("Vary", "Origin");
     }
 
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET, POST, OPTIONS"
+    );
+
+    res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+    );
 
     if (req.method === "OPTIONS") {
         return res.sendStatus(204);
@@ -32,6 +39,11 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "10kb" }));
+
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+    console.error("Missing Supabase environment variables.");
+    process.exit(1);
+}
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -44,6 +56,7 @@ app.get("/", (req, res) => {
     });
 });
 
+// Test Supabase connection
 app.get("/api/db-test", async (req, res) => {
     try {
         const { error } = await supabase
@@ -62,14 +75,17 @@ app.get("/api/db-test", async (req, res) => {
 
         res.status(500).json({
             connected: false,
-            error: error.message
+            error: "Database connection failed."
         });
     }
 });
 
+// Save a completed game
 app.post("/api/save-game", async (req, res) => {
     try {
-        const { result } = req.body || {};
+        const result = typeof req.body?.result === "string"
+            ? req.body.result.trim()
+            : "";
 
         const scores = {
             "Player Wins": [1, 0],
@@ -83,7 +99,7 @@ app.post("/api/save-game", async (req, res) => {
 
         if (!Object.prototype.hasOwnProperty.call(scores, result)) {
             return res.status(400).json({
-                error: "Invalid game result"
+                error: "Invalid game result."
             });
         }
 
@@ -92,16 +108,16 @@ app.post("/api/save-game", async (req, res) => {
         const { data, error } = await supabase
             .from("game_history")
             .insert([{
-                result,
+                result: result,
                 player_score: playerScore,
                 ai_score: aiScore
             }])
-            .select()
+            .select("id, result, player_score, ai_score, created_at")
             .single();
 
         if (error) throw error;
 
-        res.json({
+        res.status(201).json({
             message: "Game saved successfully!",
             game: data
         });
@@ -109,11 +125,12 @@ app.post("/api/save-game", async (req, res) => {
         console.error("Could not save game:", error.message);
 
         res.status(500).json({
-            error: "Could not save game. Check the server logs."
+            error: "Could not save game."
         });
     }
 });
 
+// Load the latest 20 games
 app.get("/api/game-history", async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -129,27 +146,41 @@ app.get("/api/game-history", async (req, res) => {
         console.error("Could not load game history:", error.message);
 
         res.status(500).json({
-            error: "Failed to load game history"
+            error: "Failed to load game history."
         });
     }
 });
 
+// Save a suggestion or comment
 app.post("/api/suggestions", async (req, res) => {
     try {
         const message = typeof req.body?.message === "string"
             ? req.body.message.trim()
             : "";
 
+        const name = typeof req.body?.name === "string"
+            ? req.body.name.trim().slice(0, 80)
+            : "";
+
+        const type = typeof req.body?.type === "string"
+            ? req.body.type.trim().slice(0, 40)
+            : "";
+
         if (message.length < 5 || message.length > 500) {
             return res.status(400).json({
-                error: "Suggestion must be between 5 and 500 characters."
+                error: "Message must contain 5 to 500 characters."
             });
         }
 
+        const suggestion = { message };
+
+        if (name) suggestion.name = name;
+        if (type) suggestion.type = type;
+
         const { data, error } = await supabase
             .from("suggestions")
-            .insert([{ message }])
-            .select()
+            .insert([suggestion])
+            .select("id, created_at, type, message, name")
             .single();
 
         if (error) throw error;
@@ -162,7 +193,7 @@ app.post("/api/suggestions", async (req, res) => {
         console.error("Could not save suggestion:", error.message);
 
         res.status(500).json({
-            error: "Could not submit suggestion. Check the server logs."
+            error: "Could not submit suggestion."
         });
     }
 });
