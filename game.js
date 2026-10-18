@@ -1,4 +1,10 @@
 
+"use strict";
+
+// Render backend URL
+const API_URL = "https://tic-tac-toe-backend-1vkx.onrender.com";
+
+// Game elements
 const cells = document.querySelectorAll(".cell");
 const statusText = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
@@ -16,15 +22,46 @@ const opponentLabel = document.getElementById("opponentLabel");
 const boardElement = document.querySelector(".board");
 const gameContainer = document.querySelector(".game-container");
 
-// OPTIONAL SOUND EFFECTS
+// Sound effects
 const soundToggle = document.getElementById("soundToggle");
 const soundIcon = document.getElementById("soundIcon");
 const soundText = document.getElementById("soundText");
 
+// Suggestion form elements
+const suggestionForm = document.getElementById("suggestionForm");
+const suggestionName = document.getElementById("suggestionName");
+const suggestionType = document.getElementById("suggestionType");
+const suggestionMessage = document.getElementById("suggestionMessage");
+const suggestionStatus = document.getElementById("suggestionStatus");
+const submitSuggestionBtn = document.getElementById("submitSuggestionBtn");
+
 let soundEnabled = false;
 let audioContext = null;
 
-function playTone(frequency, duration = 0.12, type = "sine", volume = 0.06) {
+let board = Array(9).fill("");
+let gameActive = false;
+let aiThinking = false;
+let resultSaved = false;
+let gameMode = "ai";
+let currentPlayer = "X";
+let aiTimer = null;
+
+const wins = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+];
+
+// ----------------------------------
+// SOUND EFFECTS
+// ----------------------------------
+
+function playTone(
+    frequency,
+    duration = 0.12,
+    type = "sine",
+    volume = 0.06
+) {
     if (!soundEnabled) return;
 
     try {
@@ -49,8 +86,14 @@ function playTone(frequency, duration = 0.12, type = "sine", volume = 0.06) {
         oscillator.frequency.setValueAtTime(frequency, now);
 
         gain.gain.setValueAtTime(0.001, now);
-        gain.gain.exponentialRampToValueAtTime(volume, now + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        gain.gain.exponentialRampToValueAtTime(
+            volume,
+            now + 0.015
+        );
+        gain.gain.exponentialRampToValueAtTime(
+            0.001,
+            now + duration
+        );
 
         oscillator.connect(gain);
         gain.connect(audioContext.destination);
@@ -82,10 +125,17 @@ function updateSoundButton() {
 
     soundIcon.textContent = soundEnabled ? "🔊" : "🔇";
     soundText.textContent = soundEnabled ? "ON" : "OFF";
-    soundToggle.setAttribute("aria-pressed", String(soundEnabled));
+
+    soundToggle.setAttribute(
+        "aria-pressed",
+        String(soundEnabled)
+    );
+
     soundToggle.setAttribute(
         "aria-label",
-        soundEnabled ? "Disable sound effects" : "Enable sound effects"
+        soundEnabled
+            ? "Disable sound effects"
+            : "Enable sound effects"
     );
 }
 
@@ -102,19 +152,40 @@ if (soundToggle) {
 
 updateSoundButton();
 
-let board = Array(9).fill("");
-let gameActive = false;
-let aiThinking = false;
-let resultSaved = false;
-let gameMode = "ai";
-let currentPlayer = "X";
-let aiTimer = null;
+// ----------------------------------
+// API HELPER
+// ----------------------------------
 
-const wins = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8],
-    [0, 3, 6], [1, 4, 7], [2, 5, 8],
-    [0, 4, 8], [2, 4, 6]
-];
+async function apiRequest(path, options = {}) {
+    const response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+        }
+    });
+
+    const text = await response.text();
+    let data = {};
+
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch {
+        data = { error: text || "Unexpected server response." };
+    }
+
+    if (!response.ok) {
+        throw new Error(
+            data.error || `Request failed (${response.status}).`
+        );
+    }
+
+    return data;
+}
+
+// ----------------------------------
+// GAME LOGIC
+// ----------------------------------
 
 function getWinningCombo(position) {
     for (const combo of wins) {
@@ -137,29 +208,25 @@ function getWinner(position) {
     return combo ? position[combo[0]] : null;
 }
 
+// Save completed game to Supabase via Render
 async function saveGameResult(result) {
     if (resultSaved) return;
+
     resultSaved = true;
 
     try {
-        const response = await fetch("/api/save-game", {
+        const data = await apiRequest("/api/save-game", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
             body: JSON.stringify({ result })
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || "Failed to save game.");
-        }
-
-        console.log("Game saved to Supabase:", data);
-        loadGameHistory();
+        console.log("Game saved:", data);
+        await loadGameHistory();
     } catch (error) {
+        // Do not silently hide save errors.
+        // Allow a future retry if the request failed.
         resultSaved = false;
+
         console.error("Could not save game:", error.message);
     }
 }
@@ -200,8 +267,13 @@ function renderBoard() {
 }
 
 function clearGameEffects() {
-    boardElement.classList.remove("board-win", "draw-board");
-    gameContainer.classList.remove("game-celebration");
+    if (boardElement) {
+        boardElement.classList.remove("board-win", "draw-board");
+    }
+
+    if (gameContainer) {
+        gameContainer.classList.remove("game-celebration");
+    }
 
     cells.forEach(cell => {
         cell.classList.remove(
@@ -213,21 +285,39 @@ function clearGameEffects() {
 }
 
 function updateModeButtons() {
-    aiModeBtn.classList.toggle("active", gameMode === "ai");
-    twoPlayerModeBtn.classList.toggle("active", gameMode === "two");
+    if (aiModeBtn) {
+        aiModeBtn.classList.toggle("active", gameMode === "ai");
+        aiModeBtn.setAttribute(
+            "aria-pressed",
+            String(gameMode === "ai")
+        );
+    }
 
-    aiModeBtn.setAttribute("aria-pressed", String(gameMode === "ai"));
-    twoPlayerModeBtn.setAttribute("aria-pressed", String(gameMode === "two"));
+    if (twoPlayerModeBtn) {
+        twoPlayerModeBtn.classList.toggle(
+            "active",
+            gameMode === "two"
+        );
 
-    opponentLabel.innerHTML = gameMode === "ai"
-        ? 'AI <strong>O</strong>'
-        : 'OPPONENT <strong>O</strong>';
+        twoPlayerModeBtn.setAttribute(
+            "aria-pressed",
+            String(gameMode === "two")
+        );
+    }
+
+    if (opponentLabel) {
+        opponentLabel.innerHTML = gameMode === "ai"
+            ? 'AI <strong>O</strong>'
+            : 'OPPONENT <strong>O</strong>';
+    }
 }
 
 function selectMode(mode) {
     gameMode = mode;
+
     clearTimeout(aiTimer);
     aiThinking = false;
+
     updateModeButtons();
     startGame();
 }
@@ -244,9 +334,11 @@ function startGame() {
 
     renderBoard();
 
-    statusText.textContent = gameMode === "ai"
-        ? "Your turn! Play as X."
-        : "Player X's turn.";
+    if (statusText) {
+        statusText.textContent = gameMode === "ai"
+            ? "Your turn! Play as X."
+            : "Player X's turn.";
+    }
 }
 
 function endGame() {
@@ -271,18 +363,26 @@ function endGame() {
                 : "Player O wins!";
         }
 
-        statusText.textContent = message;
+        if (statusText) statusText.textContent = message;
+
         playWinSound();
         renderBoard();
 
         const winningCombo = getWinningCombo(board);
 
-        boardElement.classList.add("board-win");
-        gameContainer.classList.add("game-celebration");
+        if (boardElement) {
+            boardElement.classList.add("board-win");
+        }
 
-        winningCombo.forEach(index => {
-            cells[index].classList.add("winning-cell");
-        });
+        if (gameContainer) {
+            gameContainer.classList.add("game-celebration");
+        }
+
+        if (winningCombo) {
+            winningCombo.forEach(index => {
+                cells[index].classList.add("winning-cell");
+            });
+        }
 
         saveGameResult(result);
         return true;
@@ -290,12 +390,21 @@ function endGame() {
 
     if (board.every(cell => cell !== "")) {
         gameActive = false;
-        statusText.textContent = "It's a draw!";
+
+        if (statusText) {
+            statusText.textContent = "It's a draw!";
+        }
+
         playDrawSound();
         renderBoard();
 
-        boardElement.classList.add("draw-board");
-        cells.forEach(cell => cell.classList.add("draw-cell"));
+        if (boardElement) {
+            boardElement.classList.add("draw-board");
+        }
+
+        cells.forEach(cell => {
+            cell.classList.add("draw-cell");
+        });
 
         saveGameResult("Draw");
         return true;
@@ -304,11 +413,16 @@ function endGame() {
     return false;
 }
 
+// ----------------------------------
+// AI: MINIMAX
+// ----------------------------------
+
 function minimax(position, isMaximizing, depth = 0) {
     const winner = getWinner(position);
 
     if (winner === "O") return 10 - depth;
     if (winner === "X") return depth - 10;
+
     if (position.every(cell => cell !== "")) return 0;
 
     if (isMaximizing) {
@@ -317,7 +431,13 @@ function minimax(position, isMaximizing, depth = 0) {
         for (let i = 0; i < 9; i++) {
             if (position[i] === "") {
                 position[i] = "O";
-                const score = minimax(position, false, depth + 1);
+
+                const score = minimax(
+                    position,
+                    false,
+                    depth + 1
+                );
+
                 position[i] = "";
                 bestScore = Math.max(bestScore, score);
             }
@@ -331,7 +451,13 @@ function minimax(position, isMaximizing, depth = 0) {
     for (let i = 0; i < 9; i++) {
         if (position[i] === "") {
             position[i] = "X";
-            const score = minimax(position, true, depth + 1);
+
+            const score = minimax(
+                position,
+                true,
+                depth + 1
+            );
+
             position[i] = "";
             bestScore = Math.min(bestScore, score);
         }
@@ -347,7 +473,9 @@ function getBestMove() {
     for (let i = 0; i < 9; i++) {
         if (board[i] === "") {
             board[i] = "O";
+
             const score = minimax(board, false);
+
             board[i] = "";
 
             if (score > bestScore) {
@@ -365,7 +493,10 @@ function aiMove() {
 
     aiThinking = true;
     renderBoard();
-    statusText.textContent = "AI is thinking...";
+
+    if (statusText) {
+        statusText.textContent = "AI is thinking...";
+    }
 
     aiTimer = setTimeout(() => {
         if (!gameActive || gameMode !== "ai") {
@@ -384,7 +515,10 @@ function aiMove() {
         aiThinking = false;
 
         if (!endGame()) {
-            statusText.textContent = "Your turn! Play as X.";
+            if (statusText) {
+                statusText.textContent = "Your turn! Play as X.";
+            }
+
             renderBoard();
         }
     }, 500);
@@ -393,7 +527,12 @@ function aiMove() {
 function handleCellClick(event) {
     const index = Array.from(cells).indexOf(event.currentTarget);
 
-    if (!gameActive || aiThinking || board[index] !== "") {
+    if (
+        !gameActive ||
+        aiThinking ||
+        index < 0 ||
+        board[index] !== ""
+    ) {
         return;
     }
 
@@ -407,7 +546,12 @@ function handleCellClick(event) {
         aiMove();
     } else {
         currentPlayer = currentPlayer === "X" ? "O" : "X";
-        statusText.textContent = `Player ${currentPlayer}'s turn.`;
+
+        if (statusText) {
+            statusText.textContent =
+                `Player ${currentPlayer}'s turn.`;
+        }
+
         renderBoard();
     }
 }
@@ -416,75 +560,191 @@ cells.forEach(cell => {
     cell.addEventListener("click", handleCellClick);
 });
 
-startBtn.addEventListener("click", startGame);
-restartBtn.addEventListener("click", startGame);
+if (startBtn) {
+    startBtn.addEventListener("click", startGame);
+}
 
-aiModeBtn.addEventListener("click", () => selectMode("ai"));
-twoPlayerModeBtn.addEventListener("click", () => selectMode("two"));
+if (restartBtn) {
+    restartBtn.addEventListener("click", startGame);
+}
+
+if (aiModeBtn) {
+    aiModeBtn.addEventListener("click", () => selectMode("ai"));
+}
+
+if (twoPlayerModeBtn) {
+    twoPlayerModeBtn.addEventListener(
+        "click",
+        () => selectMode("two")
+    );
+}
+
+// ----------------------------------
+// GAME HISTORY
+// ----------------------------------
 
 async function loadGameHistory() {
+    if (!historyList) return;
+
     historyList.innerHTML = "<p>Loading game history...</p>";
 
     try {
-        const response = await fetch("/api/game-history");
-
-        if (!response.ok) {
-            throw new Error("Failed to load game history");
-        }
-
-        const games = await response.json();
+        const games = await apiRequest("/api/game-history");
 
         if (!Array.isArray(games) || games.length === 0) {
             historyList.innerHTML = "<p>No games played yet.</p>";
             return;
         }
 
-        historyList.innerHTML = games.map(game => {
-            const date = new Date(game.created_at).toLocaleString();
+        historyList.replaceChildren();
 
-            return `
-                <div class="history-item">
-                    <strong>${game.result}</strong>
-                    <span>Player: ${game.player_score} | Opponent: ${game.ai_score}</span>
-                    <small>${date}</small>
-                </div>
-            `;
-        }).join("");
+        games.forEach(game => {
+            const item = document.createElement("div");
+            item.className = "history-item";
+
+            const result = document.createElement("strong");
+            result.textContent = game.result || "Unknown result";
+
+            const scores = document.createElement("span");
+            scores.textContent =
+                `Player: ${game.player_score} | Opponent: ${game.ai_score}`;
+
+            const date = document.createElement("small");
+            date.textContent = game.created_at
+                ? new Date(game.created_at).toLocaleString()
+                : "Date unavailable";
+
+            item.append(result, scores, date);
+            historyList.appendChild(item);
+        });
     } catch (error) {
         console.error("Could not load game history:", error.message);
-        historyList.innerHTML = "<p>Unable to load game history.</p>";
+        historyList.innerHTML =
+            "<p>Unable to load game history. Please try again.</p>";
     }
 }
 
-refreshHistoryBtn.addEventListener("click", loadGameHistory);
+if (refreshHistoryBtn) {
+    refreshHistoryBtn.addEventListener("click", loadGameHistory);
+}
 
 function openHistory() {
+    if (!historySidebar || !historyMenuBtn) return;
+
     historySidebar.classList.add("open");
     historyMenuBtn.setAttribute("aria-expanded", "true");
     historySidebar.setAttribute("aria-hidden", "false");
+
     loadGameHistory();
 }
 
 function closeHistory() {
+    if (!historySidebar || !historyMenuBtn) return;
+
     historySidebar.classList.remove("open");
     historyMenuBtn.setAttribute("aria-expanded", "false");
     historySidebar.setAttribute("aria-hidden", "true");
+
     historyMenuBtn.focus();
 }
 
-historyMenuBtn.addEventListener("click", openHistory);
-closeHistoryBtn.addEventListener("click", closeHistory);
+if (historyMenuBtn) {
+    historyMenuBtn.addEventListener("click", openHistory);
+}
+
+if (closeHistoryBtn) {
+    closeHistoryBtn.addEventListener("click", closeHistory);
+}
 
 document.addEventListener("keydown", event => {
     if (
         event.key === "Escape" &&
+        historySidebar &&
         historySidebar.classList.contains("open")
     ) {
         closeHistory();
     }
 });
 
+// ----------------------------------
+// SUGGESTIONS AND COMMENTS
+// ----------------------------------
+
+if (suggestionForm) {
+    suggestionForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const name = suggestionName
+            ? suggestionName.value.trim()
+            : "";
+
+        const type = suggestionType
+            ? suggestionType.value
+            : "Suggestion";
+
+        const message = suggestionMessage
+            ? suggestionMessage.value.trim()
+            : "";
+
+        if (message.length < 5 || message.length > 500) {
+            if (suggestionStatus) {
+                suggestionStatus.textContent =
+                    "Your message must be between 5 and 500 characters.";
+            }
+            return;
+        }
+
+        if (submitSuggestionBtn) {
+            submitSuggestionBtn.disabled = true;
+            submitSuggestionBtn.textContent = "Sending...";
+        }
+
+        if (suggestionStatus) {
+            suggestionStatus.textContent = "Submitting your feedback...";
+        }
+
+        try {
+            const data = await apiRequest("/api/suggestions", {
+                method: "POST",
+                body: JSON.stringify({
+                    name,
+                    type,
+                    message
+                })
+            });
+
+            if (suggestionStatus) {
+                suggestionStatus.textContent =
+                    data.message || "Thank you! Your feedback was submitted.";
+            }
+
+            suggestionForm.reset();
+        } catch (error) {
+            console.error("Could not submit feedback:", error.message);
+
+            if (suggestionStatus) {
+                suggestionStatus.textContent =
+                    `Unable to send feedback: ${error.message}`;
+            }
+        } finally {
+            if (submitSuggestionBtn) {
+                submitSuggestionBtn.disabled = false;
+                submitSuggestionBtn.textContent = "Send Feedback";
+            }
+        }
+    });
+}
+
+// ----------------------------------
+// INITIALIZE GAME
+// ----------------------------------
+
 updateModeButtons();
 renderBoard();
-statusText.textContent = "Choose a mode, then press Start Game.";
+
+if (statusText) {
+    statusText.textContent =
+        "Choose a mode, then press Start Game.";
+}
+
 loadGameHistory();
