@@ -31,7 +31,7 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "10kb" }));
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -69,13 +69,15 @@ app.get("/api/db-test", async (req, res) => {
 
 app.post("/api/save-game", async (req, res) => {
     try {
-        const { result } = req.body;
+        const { result } = req.body || {};
 
         const scores = {
+            "Player Wins": [1, 0],
+            "AI Wins": [0, 1],
+            "Player X Wins": [1, 0],
+            "Player O Wins": [0, 1],
             "Player": [1, 0],
             "AI": [0, 1],
-            "Player X": [1, 0],
-            "Player O": [0, 1],
             "Draw": [0, 0]
         };
 
@@ -107,7 +109,7 @@ app.post("/api/save-game", async (req, res) => {
         console.error("Could not save game:", error.message);
 
         res.status(500).json({
-            error: error.message
+            error: "Could not save game. Check the server logs."
         });
     }
 });
@@ -128,6 +130,39 @@ app.get("/api/game-history", async (req, res) => {
 
         res.status(500).json({
             error: "Failed to load game history"
+        });
+    }
+});
+
+app.post("/api/suggestions", async (req, res) => {
+    try {
+        const message = typeof req.body?.message === "string"
+            ? req.body.message.trim()
+            : "";
+
+        if (message.length < 5 || message.length > 500) {
+            return res.status(400).json({
+                error: "Suggestion must be between 5 and 500 characters."
+            });
+        }
+
+        const { data, error } = await supabase
+            .from("suggestions")
+            .insert([{ message }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(201).json({
+            message: "Suggestion submitted successfully!",
+            suggestion: data
+        });
+    } catch (error) {
+        console.error("Could not save suggestion:", error.message);
+
+        res.status(500).json({
+            error: "Could not submit suggestion. Check the server logs."
         });
     }
 });
